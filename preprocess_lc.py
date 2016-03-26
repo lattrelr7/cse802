@@ -3,36 +3,60 @@ import argparse
 import sqlite3
 import os
 import csv
-
-DATA_DELIMITER = ","
-LINES_TO_SKIP = 1 # Any meta-data we want to skip over
+import statistics
 
 NORMALIZE = "normalize"
 CATEGORIZE = "categorize"
 NOTHING = "nothing"
+ENUMERATE = "enumerate"
 
-# column_name => NORMALIZE|CATEGORIZE
+#######################################################
+################ Configuration ########################
+#######################################################
+# Any meta-data we want to skip over; 
+# how many rows until we get the header
+LINES_TO_SKIP = 1 
+
+# column_name => NORMALIZE|CATEGORIZE|ENUMERATE|NOTHING
 data_configuration = {
     "loan_amnt": NORMALIZE,
-    "funded_amnt_inv": NORMALIZE,
     "term": CATEGORIZE,
     "int_rate": NORMALIZE,
     "installment": NORMALIZE,
+    "grade": CATEGORIZE,
+    "sub_grade": CATEGORIZE,
     "emp_length": CATEGORIZE,
     "home_ownership": CATEGORIZE,
     "annual_inc": NORMALIZE,
-    "verification_status": CATEGORIZE,
-    "purpose": CATEGORIZE,
+    #"verification_status": CATEGORIZE,
+    #"purpose": CATEGORIZE,
     "dti": NORMALIZE,
-    "grade": NOTHING
+    "fico_range_low": NORMALIZE,
+    "inq_last_6mths": NORMALIZE,
+    "open_acc": NORMALIZE,
+    "revol_bal": NORMALIZE,
+    "revol_util": NORMALIZE,
+    "total_acc": NORMALIZE,
+    "grade": CATEGORIZE,
+    "loan_status": ENUMERATE
     }
+
+# Used for SVM output, must be enumerated column
+LABEL_COLUMN_NAME = "loan_status"
+# What type of samples do we want from the label column
+SET_LABELS = {"Fully Paid", "Charged Off"}
+TRAIN_PERC = 50
+#######################################################
+#######################################################
+#######################################################
 
 def main():
     """
     """
     parser = argparse.ArgumentParser()
     parser.add_argument("csv_file", type=str, help="Path to CSV file")
-    parser.add_argument("--svm", action="store_true", help="output svm file?")
+    parser.add_argument("--svm", action="store_true", help="Create file formatted for libsvm")
+    parser.add_argument("--train", action="store_true", help="Create train/test files for libsvm")
     args = parser.parse_args()
     
     if(not os.path.exists(args.csv_file)):
@@ -42,15 +66,13 @@ def main():
     # Read column data from CSV file
     column_table, row_number = parse_csv_file(args.csv_file)
     
-    #for key, column in column_table.items():
-    #    print(key, len(column), column[-1])
-    
     # Process the columns we want
     output_columns = {}
     for column_name,method in data_configuration.items():
         if(column_table.get(column_name) is not None):
             if(method == NORMALIZE):
                 try:
+                    output_columns[column_name] = standardize_column(column_table[column_name])                    
                     output_columns[column_name] = normalize_column(column_table[column_name])
                 except Exception as e:
                     print("Error on column", column_name, e)
@@ -59,6 +81,8 @@ def main():
                     output_columns[new_name] = new_column
             elif(method == NOTHING):
                 output_columns[column_name] = column_table[column_name]
+            elif(method == ENUMERATE):
+                output_columns[column_name] = enumerate_column(args.csv_file, column_table[column_name], column_name)
         else:
             print("Skipping column " + column_name)
     
@@ -84,18 +108,44 @@ def main():
                 if(column_idx == column_number):
                     f.write("\n")
                 else:
-                    f.write(",")                
+                    f.write(",")    
+    
+    if(args.svm):
+        format_for_libsvm(args.csv_file, row_number, output_columns)
+    
+    if(args.svm and args.train):
+        create_test_train_files(args.csv_file + ".svm.txt")
+    
+def create_test_train_files(svm_file_path):
+    """
+    """
+    num_rows = 0
+    with open(svm_file_path, 'r', encoding="utf8") as svm_in_f:
+        for line in svm_in_f:
+            num_rows += 1  
+    
+    num_train_rows = int((TRAIN_PERC/100) * num_rows)
+    with open(svm_file_path, 'r', encoding="utf8") as svm_in_f:  
+        with open(svm_file_path + ".train", 'w', encoding="utf8") as svm_out_train:  
+            with open(svm_file_path + ".test", 'w', encoding="utf8") as svm_out_test:
+                for idx,line in enumerate(svm_in_f):
+                    if(idx < num_train_rows):
+                        svm_out_train.write(line)
+                    else:
+                        svm_out_test.write(line)
             
-
 def normalize_column(column):
-    """ Normalize column data on a scale of [0,1]
+    """ Normalize column data on a scale of [-1,1]
     """
     max_value = 0
     min_value = 0
     
     # Convert to floats
     for idx,value in enumerate(column):
-        column[idx] = float(value.strip("% "))
+        try:
+            column[idx] = float(value.strip("% "))
+        except:
+            break
     
     # Find max and min
     max_value = max(column)
@@ -104,10 +154,27 @@ def normalize_column(column):
     # Normalize each value
     # (value - min)/(max - min)
     for idx,value in enumerate(column):
-        column[idx] = round((value - min_value)/(max_value - min_value),4)
-        
-        if(column[idx] > 1):
-            print(value, max_value, min_value)
+        #column[idx] = round((value - min_value)/(max_value - min_value),4)
+        column[idx] = round((2*value - max_value - min_value)/(max_value - min_value),4)
+    
+    return column
+
+def standardize_column(column):
+    """ Standardize column data
+    """
+    # Convert to floats
+    for idx,value in enumerate(column):
+        try:
+            column[idx] = float(value.strip("% "))
+        except:
+            break
+            
+    # Find mean and std dev
+    mean = statistics.mean(column)
+    stddev = statistics.stdev(column)
+
+    for idx,value in enumerate(column):
+        column[idx] = round((value - mean)/stddev,4)
     
     return column
 
@@ -130,15 +197,59 @@ def categorize_column(column):
             if(value == discrete_value):
                 new_columns[discrete_value].append(1)
             else:
-                new_columns[discrete_value].append(0)
+                new_columns[discrete_value].append(-1)
 
     return new_columns
 
-def format_for_libsvm():
-    #Turn sql data into lib svm format
-    #lib svm format: <label> <feature_idx>:<feature_value> <feature_idx>:<feature_value> ...
-    #also scale any non-binary data from 0 to 1.
-    return
+def enumerate_column(csv_file, column, column_name):
+    """ Change a column with discrete values to numerical representations
+    """
+    # Get set of unique values
+    discrete_values = set()
+    for value in column:
+        discrete_values.add(value)
+        
+    with open(csv_file + "." + column_name + ".legend.txt", "w") as f:
+        for label,discrete_value in enumerate(discrete_values):
+            f.write(str(label) + ":" + discrete_value + "\n")
+        
+    for label,discrete_value in enumerate(discrete_values):
+        for idx,value in enumerate(column):
+            if(value == discrete_value):
+                column[idx] = label
+
+    return column    
+
+def format_for_libsvm(csv_file, row_number, output_columns):
+    """lib svm format: <label> <feature_idx>:<feature_value> <feature_idx>:<feature_value> ...
+    """
+    # Read the legend that was created from the "enumerate_column" function.
+    label_legend = {}
+    with open(csv_file + "." + LABEL_COLUMN_NAME + ".legend.txt", "r") as f:
+        for line in f:
+            label_key, label_value = line.split(":", 1)
+            label_legend[int(label_key)] = label_value.strip()
+            
+    header_list = [LABEL_COLUMN_NAME]
+    column_number = len(output_columns.keys())
+    for column_name in output_columns.keys():
+        if(column_name != LABEL_COLUMN_NAME):
+            header_list.append(column_name)
+        
+    with open(csv_file + ".svm.txt", 'w', encoding="utf8") as f:         
+        for row in range(row_number):
+            column_idx = 0
+            for feature_num,header in enumerate(header_list):
+                if(feature_num == 0):
+                    if(label_legend[output_columns[header][row]] not in SET_LABELS): break
+                    f.write(str(output_columns[header][row]))        
+                else:
+                    f.write(str(feature_num) + ":" + str(output_columns[header][row]))
+                column_idx += 1
+                if(column_idx == column_number):
+                    f.write("\n")
+                else:
+                    f.write(" ")
 
 def parse_csv_file(csv_file):
     """
