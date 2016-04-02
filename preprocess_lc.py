@@ -28,8 +28,8 @@ data_configuration = {
     "emp_length": CATEGORIZE,
     "home_ownership": CATEGORIZE,
     "annual_inc": NORMALIZE,
-    #"verification_status": CATEGORIZE,
-    #"purpose": CATEGORIZE,
+    "verification_status": CATEGORIZE,
+    "purpose": CATEGORIZE,
     "dti": NORMALIZE,
     "fico_range_low": NORMALIZE,
     "inq_last_6mths": NORMALIZE,
@@ -44,7 +44,9 @@ data_configuration = {
 # Used for SVM output, must be enumerated column
 LABEL_COLUMN_NAME = "loan_status"
 # What type of samples do we want from the label column
-SET_LABELS = {"Fully Paid", "Charged Off"}
+# hard code what number corresponds to each class in the
+# resulting libsvm file
+SET_LABELS = {"Fully Paid":0, "Charged Off":1}
 TRAIN_PERC = 50
 #######################################################
 #######################################################
@@ -114,7 +116,7 @@ def main():
         format_for_libsvm(args.csv_file, row_number, output_columns)
     
     if(args.svm and args.train):
-        create_test_train_files(args.csv_file + ".svm.txt")
+        create_test_train_files(args.csv_file + ".libsvm")
     
 def create_test_train_files(svm_file_path):
     """
@@ -126,8 +128,8 @@ def create_test_train_files(svm_file_path):
     
     num_train_rows = int((TRAIN_PERC/100) * num_rows)
     with open(svm_file_path, 'r', encoding="utf8") as svm_in_f:  
-        with open(svm_file_path + ".train", 'w', encoding="utf8") as svm_out_train:  
-            with open(svm_file_path + ".test", 'w', encoding="utf8") as svm_out_test:
+        with open(svm_file_path + ".train.libsvm", 'w', encoding="utf8") as svm_out_train:  
+            with open(svm_file_path + ".test.libsvm", 'w', encoding="utf8") as svm_out_test:
                 for idx,line in enumerate(svm_in_f):
                     if(idx < num_train_rows):
                         svm_out_train.write(line)
@@ -154,8 +156,8 @@ def normalize_column(column):
     # Normalize each value
     # (value - min)/(max - min)
     for idx,value in enumerate(column):
-        #column[idx] = round((value - min_value)/(max_value - min_value),4)
-        column[idx] = round((2*value - max_value - min_value)/(max_value - min_value),4)
+        column[idx] = round((value - min_value)/(max_value - min_value),4)
+        #column[idx] = round((2*value - max_value - min_value)/(max_value - min_value),4)
     
     return column
 
@@ -197,7 +199,7 @@ def categorize_column(column):
             if(value == discrete_value):
                 new_columns[discrete_value].append(1)
             else:
-                new_columns[discrete_value].append(-1)
+                new_columns[discrete_value].append(0)
 
     return new_columns
 
@@ -236,13 +238,14 @@ def format_for_libsvm(csv_file, row_number, output_columns):
         if(column_name != LABEL_COLUMN_NAME):
             header_list.append(column_name)
         
-    with open(csv_file + ".svm.txt", 'w', encoding="utf8") as f:         
+    with open(csv_file + ".libsvm", 'w', encoding="utf8") as f:         
         for row in range(row_number):
             column_idx = 0
             for feature_num,header in enumerate(header_list):
                 if(feature_num == 0):
-                    if(label_legend[output_columns[header][row]] not in SET_LABELS): break
-                    f.write(str(output_columns[header][row]))        
+                    if(label_legend[output_columns[header][row]] not in SET_LABELS.keys()): break
+                    #f.write(str(output_columns[header][row]))     
+                    f.write(str(SET_LABELS[label_legend[output_columns[header][row]]]))
                 else:
                     f.write(str(feature_num) + ":" + str(output_columns[header][row]))
                 column_idx += 1
