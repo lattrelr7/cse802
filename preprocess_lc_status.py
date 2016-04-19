@@ -253,6 +253,10 @@ def format_for_libsvm(csv_file, row_number, output_columns):
                     f.write("\n")
                 else:
                     f.write(" ")
+                    
+    with open(csv_file + ".libsvm.features.txt", 'w', encoding="utf8") as f:         
+        for feature_num,header in enumerate(header_list):
+                f.write(str(feature_num) + ":" + str(header) + "\n")                  
 
 def parse_csv_file(csv_file):
     """
