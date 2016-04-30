@@ -31,6 +31,10 @@ def main():
         confusion_matrix[actual_class][predicted_class] += 1
 
     for row in confusion_matrix:
-        print(row)
+        print(row, sum(row))
+        
+    with open("dat.csv", "w") as f:
+        for row in confusion_matrix:
+            f.write(",".join([str(x) for x in row]) + "\n")
 
 if __name__ == "__main__": main()

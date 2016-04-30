@@ -21,7 +21,7 @@ LINES_TO_SKIP = 1
 data_configuration = {
     "loan_amnt": NORMALIZE,
     "term": CATEGORIZE,
-    "int_rate": NORMALIZE,
+    #"int_rate": NORMALIZE,
     "installment": NORMALIZE,
     #"grade": ENUMERATE,
     "sub_grade": ENUMERATE,
